@@ -1,7 +1,7 @@
 package main
 
 import (
-	"emtool/mlogger"
+	"emtool/common/mlogger"
 	"flag"
 	"fmt"
 )
