@@ -3,24 +3,9 @@ package mconn
 import (
 	"emtool/common/mlogger"
 	"gopkg.in/mgo.v2"
-	//"gopkg.in/mgo.v2/bson"
+	"gopkg.in/mgo.v2/bson"
 )
 
-/*
-type MongoInfo struct {
-	Fromhost     string
-	Tohost       string
-	Fromport     string
-	Toport       string
-	SrcClient    *mgo.Session
-	DestClient   *mgo.Session
-	SrcDBConn    *mgo.Database
-	DestDBConn   *mgo.Database
-	SrcCollConn  *mgo.Collection
-	DestCollConn *mgo.Collection
-}
-
-*/
 func GetMongoDBUrl(addr, port, username, password string) string {
 	var mongoDBUrl string
 	if port == "no" {
@@ -52,5 +37,19 @@ func Conn(MongoUri string) *mgo.Session {
 		mlogger.Logger("i", "Connect to "+MongoUri+" Successed!")
 	}
 	return MClient
+
+}
+
+func Getsrctype(Mclient *mgo.Session) string {
+	var srctype string
+	command := bson.M{"isMaster": 1}
+	result := bson.M{}
+	Mclient.Run(command, &result)
+	if result["msg"] == "isdbgrid" {
+		srctype = "mongos"
+	} else {
+		srctype = "mongod"
+	}
+	return srctype
 
 }
