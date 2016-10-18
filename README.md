@@ -9,7 +9,7 @@
 
 - Then
 ```
- A service 
+ A Replication service 
 ```
 ```
  A Multi-Master middleware between two Repl Set
