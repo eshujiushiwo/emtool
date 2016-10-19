@@ -1,14 +1,20 @@
 package mconn
 
 import (
-	"emtool/common/mlogger"
+	//"emtool/common/mlog"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
+	"log"
+	"os"
 )
+
+//Get Mongodb Connection strings
+var logger *log.Logger
 
 func GetMongoDBUrl(addr, port, username, password string) string {
 	var mongoDBUrl string
 	if port == "no" {
+
 		if username == "" || password == "" {
 
 			mongoDBUrl = "mongodb://" + addr
@@ -27,19 +33,22 @@ func GetMongoDBUrl(addr, port, username, password string) string {
 	return mongoDBUrl
 }
 
+// Build Connections
 func Conn(MongoUri string) *mgo.Session {
-
 	MClient, err := mgo.Dial(MongoUri)
-	mlogger.Logger("i", "The source url is "+MongoUri)
+
 	if err != nil {
-		mlogger.Logger("e", "Connect to "+MongoUri+" Failed!"+err.Error())
+
+		logger.Println("Connect to ", MongoUri, " Failed!", err.Error())
+		os.Exit(-1)
 	} else {
-		mlogger.Logger("i", "Connect to "+MongoUri+" Successed!")
+		logger.Println("Connect to ", MongoUri, " Successed!")
 	}
 	return MClient
 
 }
 
+// Check the node is mongod or not
 func Getsrctype(Mclient *mgo.Session) string {
 	var srctype string
 	command := bson.M{"isMaster": 1}
@@ -52,4 +61,7 @@ func Getsrctype(Mclient *mgo.Session) string {
 	}
 	return srctype
 
+}
+func init() {
+	logger = log.New(os.Stdout, "\r\n", log.Ldate|log.Ltime|log.Lshortfile)
 }
