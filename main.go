@@ -83,7 +83,7 @@ func (mongoinfo *MongoInfo) StartRestore() {
 			fmt.Println(result["ts"])
 			lastTs = result["ts"].(bson.MongoTimestamp)
 			timestamp := result["ts"].(bson.MongoTimestamp) >> 32
-			mongoinfo.ApplyOplog(result, result["ns"].(string))
+			go mongoinfo.ApplyOplog(result, result["ns"].(string))
 			logger.Println("from: ", mongoinfo.fromhost, " to: ", mongoinfo.tohost, " MongoTimestamp: ", result["ts"], " Unixtimestamp: ", timestamp)
 		}
 		if oplogIter.Err() != nil {
