@@ -2,9 +2,7 @@ package main
 
 import (
 	"emtool/common/mconn"
-	//	"emtool/common/mlog"
-
-	"encoding/json"
+	"encoding/gob"
 	"flag"
 	"fmt"
 	"gopkg.in/mgo.v2"
@@ -12,7 +10,6 @@ import (
 	"log"
 	"net"
 	"os"
-	//"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -50,13 +47,10 @@ func (mongoinfo *MongoInfo) ApplyOplog(oplog bson.M, coll string) {
 	op := oplog["op"]
 	dbcoll := strings.SplitN(coll, ".", 2)
 	switch op {
-	//deal with c like: map[ts:6344943641508708353 t:3 h:-7397456082642233555 v:2 op:c ns:b.$cmd o:map[drop:a]]
+	//ToDo:deal with c like: map[ts:6344943641508708353 t:3 h:-7397456082642233555 v:2 op:c ns:b.$cmd o:map[drop:a]]
 	case "i":
-		a1 := time.Now().UnixNano()
 
 		err_i := mongoinfo.destClient.DB(dbcoll[0]).C(dbcoll[1]).Insert(oplog["o"])
-		a2 := time.Now().UnixNano()
-		logger.Println("111: ", a2-a1)
 		if err_i != nil {
 
 			logger.Println(err_i.Error())
@@ -94,25 +88,61 @@ func (mongoinfo *MongoInfo) StartReadOplog() {
 	var mongostartts = bson.MongoTimestamp(tmp1)
 	oplogquery := bson.M{"ts": bson.M{"$gte": mongostartts}}
 	oplogIter := oplogDB.Find(oplogquery).LogReplay().Sort("$natural").Tail(5 * time.Second)
-
+	a1 := time.Now().UnixNano()
+	conn, err := CreateTcpClient()
+	a2 := time.Now().UnixNano()
+	logger.Println("tcp连接耗时: ", a2-a1)
+	defer conn.Close()
+	if err != nil {
+		logger.Println("Connect TCP Server Failed", err.Error())
+	}
 	for {
+		a := 0
 		for oplogIter.Next(&result) {
-			/*
-				conn, err := CreateTcpClient()
-				if err != nil {
-					logger.Println("Connect TCP Server Failed", err.Error())
-				}*/
 
-			a1 := time.Now().UnixNano()
+			a3 := time.Now().UnixNano()
+			err = SendOplog(conn, result)
+			a4 := time.Now().UnixNano()
+			logger.Println("sendoplog耗时: ", a4-a3)
+			CheckErr(err)
+			a++
+			logger.Println(a)
+		}
+		if oplogIter.Err() != nil {
+			oplogIter.Close()
+		}
+		if oplogIter.Timeout() {
+			continue
+		}
+		oplogIter = oplogDB.Find(bson.M{"ts": bson.M{"$gte": lastTs}}).LogReplay().Sort("$natural").Tail(5 * time.Second)
+
+	}
+
+}
+
+//do not use tcp & applyoplog
+func (mongoinfo *MongoInfo) StartReadOplog_s() {
+	oplogDB := mongoinfo.srcclient.DB("local").C("oplog.rs")
+	var lastTs bson.MongoTimestamp
+	var result bson.M
+	var err error
+	var tmp1 int64
+	tmp1 = mongoinfo.startpos << 32
+	var mongostartts = bson.MongoTimestamp(tmp1)
+	oplogquery := bson.M{"ts": bson.M{"$gte": mongostartts}}
+	oplogIter := oplogDB.Find(oplogquery).LogReplay().Sort("$natural").Tail(5 * time.Second)
+
+	if err != nil {
+		logger.Println("Connect TCP Server Failed", err.Error())
+	}
+	for {
+
+		for oplogIter.Next(&result) {
 
 			timestamp := result["ts"].(bson.MongoTimestamp) >> 32
 			mongoinfo.ApplyOplog(result, result["ns"].(string))
-			a2 := time.Now().UnixNano()
-			logger.Println("写db耗时: ", a2-a1)
-			logger.Println("from: ", mongoinfo.fromhost, " to: ", mongoinfo.tohost, " MongoTimestamp: ", result["ts"], " Unixtimestamp: ", timestamp)
 
-			//	err = SendOplog(conn, result)
-			//	CheckErr(err)
+			logger.Println("from: ", mongoinfo.fromhost, " to: ", mongoinfo.tohost, " MongoTimestamp: ", result["ts"], " Unixtimestamp: ", timestamp)
 
 		}
 		if oplogIter.Err() != nil {
@@ -126,6 +156,7 @@ func (mongoinfo *MongoInfo) StartReadOplog() {
 	}
 
 }
+
 func StartApplyOplog(result bson.M) {
 
 	timestamp := result["ts"].(bson.MongoTimestamp) >> 32
@@ -168,25 +199,45 @@ func CreateTcpServer() {
 func ReceiveOplog(ch chan interface{}, conn net.Conn) {
 	mutex.Lock()
 	defer mutex.Unlock()
-	var dt []byte
 
-	var dt1 bson.M
-	dec := json.NewDecoder(conn)
-	err := dec.Decode(&dt)
-	if err != nil {
-		logger.Println(err.Error())
+	for {
+
+		var dt []byte
+
+		var dt1 bson.M
+
+		dec := gob.NewDecoder(conn)
+		//dec := gob.NewDecoder(conn)
+		err := dec.Decode(&dt)
+
+		logger.Println(dt)
+
+		if err != nil {
+
+			logger.Println(err.Error())
+			/*
+				if e, ok := err.(*json.SyntaxError); ok {
+					logger.Println("syntax error at byte offset ", e.Offset)
+
+				}
+			*/
+		}
+
+		err = bson.Unmarshal(dt, &dt1)
+		if err != nil {
+			logger.Println(err.Error())
+		}
+
+		logger.Println(dt1)
+		a1 := time.Now().UnixNano()
+
+		StartApplyOplog(dt1)
+
+		a2 := time.Now().UnixNano()
+		logger.Println("222", a2-a1)
+
 	}
-
-	err = bson.Unmarshal(dt, &dt1)
-	if err != nil {
-		logger.Println(err.Error())
-	}
-
-	ch <- dt1
-
-	logger.Println(dt1)
-	StartApplyOplog(dt1)
-
+	ch <- 1
 }
 
 func SendOplog(conn net.Conn, result bson.M) error {
@@ -197,13 +248,15 @@ func SendOplog(conn net.Conn, result bson.M) error {
 	if err != nil {
 		return err
 	}
-	encoder := json.NewEncoder(conn)
+
+	encoder := gob.NewEncoder(conn)
+	//encoder := gob.NewEncoder(conn)
 	err = encoder.Encode(a)
 
 	if err != nil {
 		return err
 	}
-	conn.Close()
+	//conn.Close()
 	fmt.Println("done")
 	return err
 }
@@ -215,7 +268,7 @@ func CheckErr(err error) {
 }
 
 func main() {
-	var fromhost, tohost, fromport, toport string
+	var fromhost, tohost, fromport, toport, mode string
 	var startpos int64
 
 	//	var tcpconn net.Conn
@@ -223,6 +276,7 @@ func main() {
 	flag.StringVar(&tohost, "tohost", "", "the dest host")
 	flag.StringVar(&fromport, "fromport", "27017", "the source port")
 	flag.StringVar(&toport, "toport", "27017", "the dest port")
+	flag.StringVar(&mode, "mode", "single", "server or client or single")
 	flag.Int64Var(&startpos, "startpos", 0, "the start timestamp")
 
 	flag.Parse()
@@ -232,13 +286,19 @@ func main() {
 	mongoinfo = &MongoInfo{fromhost, tohost, fromport, toport, "", "", 0, nil, nil}
 	if fromhost == "" || tohost == "" {
 		logger.Println("Please use -help to check the usage")
-	} else {
+	} else if mode == "server" {
+		logger.Println(mode)
 		mongoinfo.InitMongoinfo()
-		//CreateTcpServer()
-		mongoinfo.StartReadOplog()
-		fmt.Println(mongoinfo.srcurl)
-		logger.Println("HI")
+		CreateTcpServer()
 
+	} else if mode == "client" {
+		mongoinfo.InitMongoinfo()
+
+		mongoinfo.StartReadOplog()
+
+	} else if mode == "single" {
+		mongoinfo.InitMongoinfo()
+		mongoinfo.StartReadOplog_s()
 	}
 
 }
